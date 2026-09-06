@@ -4,7 +4,7 @@
 --          of the data warehouse.
 --          Existing data is truncated before each load, and
 --          execution time is logged for monitoring purposes.
--- Accepts to parameters 
+-- Accepts no parameters 
 -- Usage: CALL bronze.load_bronze();
 -- =============================================================
 
