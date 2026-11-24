@@ -1,120 +1,77 @@
-DROP VIEW IF EXISTS gold.attractions;
-CREATE VIEW gold.attractions AS
+/*
+===============================================================================
+DDL Script: Create Gold Views
+===============================================================================
+Script Purpose:
+    This script creates views for the Gold layer in the data warehouse. 
+    The Gold layer represents the final dimension and fact tables (Star Schema)
+
+    Each view performs transformations and combines data from the Silver layer 
+    to produce a clean, enriched, and business-ready dataset.
+
+Usage:
+    - These views can be queried directly for analytics and reporting.
+===============================================================================
+*/
+
+-- Customer Dimention
+CREATE VIEW gold.dim_customers AS
 SELECT 
-    ROW_NUMBER() OVER (ORDER BY po.osm_id) AS id,
-    po.osm_id,
-    po.name,
-    po.way AS geom,
-
-    CASE
-        WHEN po.historic IS NOT NULL AND po.historic NOT IN ('yes', 'yes;used') THEN po.historic
-		WHEN po.religion IS NOT NULL AND po.religion NOT IN ('none') THEN po.religion
-        WHEN po.tourism IS NOT NULL AND  po.tourism NOT IN ('yes') THEN po.tourism
-        ELSE 'n/a'
-    END AS category
+	ROW_NUMBER() OVER(ORDER BY cst_id) AS customer_key,
+	ci.cst_id AS customer_id,
+	ci.cst_key AS customer_number,
+	ci.cst_firstname AS first_name,
+	ci.cst_lastname AS last_name,
+	la.cntry AS country,
+	ci.cst_marital_status AS marital_status,
 	
-FROM silver.planet_osm_point AS po
-WHERE po.historic IS NOT NULL OR 
-	po.religion IS NOT NULL OR 
-	(po.tourism IS NOT NULL AND 
-	(po.tourism NOT IN (
-        'motel',
-        'hotel',
-        'hostel',
-        'guest_house'
-    )));
+	CASE WHEN ci.cst_gndr != 'n/a' THEN ci.cst_gndr 
+		 ELSE COALESCE(ca.gen,'n/a')
+	END AS gender,
 	
+	ca.bdate AS birth_date,
+	ci.cst_create_date AS create_date
+	
+FROM silver.crm_cust_info AS ci
+LEFT JOIN silver.erp_cust_az12 AS ca
+	ON ca.cid = ci.cst_key
+LEFT JOIN silver.erp_loc_a101 AS la
+	ON la.cid = ci.cst_key;
 
-DROP VIEW IF EXISTS gold.accommodations;
-CREATE VIEW gold.accommodations AS
+-- Product Dimention
+CREATE VIEW gold.dim_products AS
 SELECT 
-    ROW_NUMBER() OVER (ORDER BY po.osm_id) AS id,
-    po.osm_id,
-    po.name,
-    po.way AS geom,
-    po.tourism AS category
-	
-FROM silver.planet_osm_point AS po
-WHERE po.tourism IN (
-        'motel',
-        'information',
-        'hotel',
-        'hostel',
-        'guest_house',
-        'apartment'
-    );
+	ROW_NUMBER() OVER(ORDER BY pn.prd_start_dt) AS product_key,
+	pn.prd_id AS product_id,
+	pn.prd_key AS product_number,
+	pn.prd_nm AS product_name,
+	pn.cat_id AS category_id,
+	pcg.cat AS categroy,
+	pcg.subcat AS subcategroy,
+	pcg.maintenance AS maintenance,
+	pn.prd_cost AS product_cost,
+	pn.prd_line AS product_line,
+	pn.prd_start_dt AS start_date
+FROM silver.crm_prd_info AS pn
+LEFT JOIN silver.erp_px_cat_g1v2 as pcg
+	ON pn.cat_id = pcg.id
+WHERE prd_end_dt is NULL -- Filter Historical Data
 
 
-DROP VIEW IF EXISTS gold.residential_area;
-CREATE VIEW gold.residential_area AS
+-- Fact Table
+CREATE VIEW gold.fact_sales AS
 SELECT 
-    ROW_NUMBER() OVER (ORDER BY po.osm_id) AS id,
-    po.osm_id,
-    po.name,
-    po.way AS geom,
-    po.place AS category
-	
-FROM silver.planet_osm_point AS po
-WHERE po.place IN (
-        'town',
-        'village',
-        'island',
-        'city',
-        'suburb'
-    );
-
-
-DROP VIEW IF EXISTS gold.services;
-CREATE VIEW gold.services AS
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY po.osm_id) AS id,
-    po.osm_id,
-    po.name,
-    po.way AS geom,
-    po.amenity AS category
-	
-FROM silver.planet_osm_point AS po
-WHERE po.amenity IN (
-	'food_court',
-	'cafe',
-	'fast_food',
-	'restaurant'
-    );
-
-DROP VIEW IF EXISTS gold.provinces;
-CREATE VIEW gold.provinces AS
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY po.osm_id) AS id,
-    po.osm_id,
-    po.name,
-    po.way AS geom
-
-	
-FROM silver.planet_osm_polygon AS po;
-
-DROP VIEW IF EXISTS gold.ways;
-CREATE VIEW gold.ways AS
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY li.osm_id) AS id,
-    li.osm_id,
-    li.name,
-    li.way AS geom,
-
-	CASE
-        WHEN li.highway IS NOT NULL THEN 'highway'
-		WHEN li.aerialway IS NOT NULL THEN 'aerialway'
-        WHEN li.railway IS NOT NULL THEN 'railway'
-		WHEN li.junction IS NOT NULL THEN 'junction'
-		WHEN li.tunnel IS NOT NULL THEN 'tunnel'
-        WHEN li.aeroway IS NOT NULL THEN 'aeroway'
-        ELSE 'n/a'
-    END AS category
-	
-FROM silver.planet_osm_line AS li
-WHERE tunnel IS NOT NULL
-	OR railway IS NOT NULL 
-	OR junction IS NOT NULL 
-	OR highway IS NOT NULL 
-	OR aeroway IS NOT NULL 
-	OR aerialway IS NOT NULL;
-
+	sd.sls_ord_num AS order_number,
+	pr.product_key,
+	cu.customer_key,
+	sd.sls_order_dt AS order_date,
+	sd.sls_ship_dt AS shipping_date ,
+	sd.sls_due_dt As due_date,
+	sd.sls_sales As sales_amount,
+	sd.sls_quantity AS quantity,
+	sd.sls_price  AS price
+FROM silver.crm_sales_details AS sd
+LEFT JOIN gold.dim_products AS pr 
+ON sd.sls_prd_key = pr.product_number
+LEFT JOIN gold.dim_customers AS cu
+ON sd.sls_cust_id = cu.customer_id
